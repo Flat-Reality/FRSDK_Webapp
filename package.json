@@ -1,0 +1,35 @@
+{
+  "name": "frsdk-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.12.0" },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@editorjs/delimiter": "1.4.2",
+    "@editorjs/editorjs": "2.31.6",
+    "@editorjs/embed": "2.7.6",
+    "@editorjs/header": "2.8.9",
+    "@editorjs/image": "2.10.3",
+    "@editorjs/list": "2.0.9",
+    "@editorjs/quote": "2.7.6",
+    "@editorjs/raw": "2.5.1",
+    "@supabase/supabase-js": "2.115.0",
+    "lucide-react": "0.468.0",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.10",
+    "@types/react-dom": "19.1.7",
+    "@vitejs/plugin-react": "4.7.0",
+    "typescript": "5.9.2",
+    "vite": "7.3.6",
+    "vitest": "3.2.4"
+  }
+}

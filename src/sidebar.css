@@ -1,0 +1,252 @@
+/* Workspace shell: the brand and navigation remain visible as a compact rail. */
+.app-shell {
+  --sidebar-width: 344px;
+  background: #fff;
+}
+
+.app-shell.sidebar-collapsed { --sidebar-width: 80px; }
+
+.sidebar {
+  width: var(--sidebar-width);
+  border-right: 0;
+  box-shadow: none;
+  overflow-x: hidden;
+  background: #fff;
+  transition: width 220ms ease;
+}
+
+.sidebar-top {
+  height: 76px;
+  flex: none;
+  padding: 18px 18px 13px 22px;
+  gap: 12px;
+}
+
+.brand {
+  flex: 1;
+  gap: 11px;
+  color: #20212b;
+}
+
+.brand-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: #222431;
+  color: #fff;
+  font-size: 18px;
+  letter-spacing: -3px;
+  padding-right: 3px;
+}
+
+.brand-icon span { color: #bd9dff; }
+
+.brand-wordmark,
+.brand-wordmark strong {
+  display: inline;
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: -.045em;
+  line-height: 1;
+  color: #20212b;
+  font-weight: 900;
+  text-transform: none;
+}
+
+.brand-wordmark strong { color: #8b5cf6; }
+
+.sidebar-toggle {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: #7e8496;
+}
+
+.sidebar-toggle:hover {
+  border-color: #e8e4f0;
+  background: #f7f5fb;
+  color: #8b5cf6;
+}
+
+.workspace-switch {
+  margin: 4px 15px 17px;
+  min-height: 69px;
+  padding: 10px 12px;
+  border-color: #e3e3eb;
+  border-radius: 12px;
+}
+
+.workspace-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  font-size: 18px;
+}
+
+.workspace-name strong { font-size: 15px; }
+.workspace-name small { margin-top: 3px; font-size: 12px; }
+
+.sidebar-create {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 48px;
+  margin: 0 15px 29px;
+  width: calc(100% - 30px);
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: #252935;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  transition: background 150ms ease, transform 150ms ease;
+}
+
+.sidebar-create:hover { background: #414056; transform: translateY(-1px); }
+.sidebar-create svg { flex: none; }
+
+.nav-group { padding: 0 15px; gap: 4px; }
+.nav-label { padding: 7px 14px 10px; font-size: 10px; color: #9398a8; }
+.nav-group button {
+  height: 47px;
+  padding: 0 14px;
+  gap: 15px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: #515667;
+  font-size: 15px;
+}
+.nav-group button svg { flex: none; color: #7c869a; }
+.nav-group button.active {
+  border-color: #e9e3f5;
+  background: #faf8ff;
+  color: #312745;
+}
+.nav-group button.active svg { color: #8b5cf6; }
+.settings-nav { margin-top: 36px; }
+
+.sidebar-bottom { padding: 16px 15px 19px; }
+.sidebar-help {
+  min-height: 82px;
+  padding: 13px 14px;
+  border-radius: 13px;
+}
+.profile-link {
+  margin-top: 13px;
+  padding: 12px 4px 2px;
+  border-top: 1px solid #e9e9ef;
+}
+.user-avatar { width: 39px; height: 39px; border-radius: 50%; }
+.profile-link strong { font-size: 13px; }
+.profile-link small { font-size: 11px; }
+
+.sidebar-collapsed .sidebar-top {
+  height: 76px;
+  flex-direction: row;
+  justify-content: center;
+  padding: 18px 12px 13px;
+}
+.sidebar-collapsed .brand { flex: none; }
+.sidebar-collapsed .brand-icon { width: 40px; height: 40px; }
+.sidebar-collapsed .workspace-switch {
+  min-height: 54px;
+  margin: 4px 15px 17px;
+  padding: 6px;
+  justify-content: center;
+  border-color: transparent;
+}
+.sidebar-collapsed .workspace-avatar { width: 42px; height: 42px; }
+.sidebar-collapsed .sidebar-create {
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 28px;
+  padding: 0;
+}
+.sidebar-collapsed .sidebar-create span { display: none; }
+.sidebar-collapsed .nav-group { padding: 0 12px; }
+.sidebar-collapsed .nav-group button {
+  width: 54px;
+  height: 50px;
+  margin: 0 auto;
+  justify-content: center;
+  padding: 0;
+}
+.sidebar-collapsed .settings-nav { margin-top: 28px; padding-top: 18px; border-top: 1px solid #e8e9ef; }
+.sidebar-collapsed .sidebar-bottom { padding: 16px 11px; }
+.sidebar-collapsed .sidebar-help { min-height: 52px; padding: 12px; }
+.sidebar-collapsed .profile-link { justify-content: center; padding-top: 15px; }
+
+.main {
+  background: #fafafd;
+  border-left: 1px solid #e6e5ec;
+  border-top-left-radius: 25px;
+  overflow: clip;
+}
+.topbar {
+  height: 76px;
+  border-bottom-color: #ebebf0;
+  border-top-left-radius: 25px;
+  background: #fafafd;
+}
+.content { padding-top: 46px; }
+.rail-scrim { display: none; }
+
+@media (max-width: 800px) {
+  .app-shell { --sidebar-width: 80px; }
+  .sidebar-collapsed .sidebar {
+    position: sticky;
+    top: 0;
+    width: 80px !important;
+    transform: none;
+    transition: width 220ms ease;
+  }
+  .app-shell:not(.sidebar-collapsed) .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: min(344px, calc(100vw - 44px)) !important;
+    transform: none;
+    box-shadow: 10px 0 35px #1d1b2a1a;
+  }
+  .app-shell:not(.sidebar-collapsed) .main { margin-left: 80px; }
+  .rail-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 19;
+    border: 0;
+    background: #17142672;
+  }
+  .sidebar-collapsed .sidebar .brand-wordmark,
+  .sidebar-collapsed .sidebar .workspace-name,
+  .sidebar-collapsed .sidebar .nav-label,
+  .sidebar-collapsed .sidebar .nav-group button span,
+  .sidebar-collapsed .sidebar .profile-link > span:nth-child(2) { display: none; }
+  .sidebar-collapsed .sidebar .nav-group button { justify-content: center; padding: 0; }
+  .sidebar-collapsed .sidebar .sidebar-top { height: 76px; flex-direction: row; padding: 18px 12px 13px; }
+  .sidebar-collapsed .sidebar .sidebar-create span { display: none; }
+  .topbar { padding: 0 20px; }
+}
+
+@media (max-width: 600px) {
+  .app-shell,
+  .app-shell.sidebar-collapsed { --sidebar-width: 68px; }
+  .sidebar-collapsed .sidebar { width: 68px !important; }
+  .app-shell:not(.sidebar-collapsed) .main { margin-left: 68px; }
+  .sidebar-collapsed .sidebar-top { padding-inline: 8px; }
+  .sidebar-collapsed .workspace-switch { margin-inline: 6px; }
+  .sidebar-collapsed .nav-group { padding-inline: 6px; }
+  .sidebar-collapsed .nav-group button { width: 50px; }
+  .sidebar-collapsed .sidebar-create { width: 50px; height: 50px; }
+  .sidebar-collapsed .sidebar-bottom { padding-inline: 6px; }
+  .sidebar-collapsed .sidebar-help { display: none; }
+  .topbar { padding: 0 14px; }
+  .breadcrumbs { gap: 6px; font-size: 11px; }
+  .breadcrumbs > span { display: none; }
+  .breadcrumbs > svg { display: none; }
+}
