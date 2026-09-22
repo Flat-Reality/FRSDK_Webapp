@@ -17,9 +17,9 @@ Without environment variables the app runs in a clearly marked local demo mode. 
 
 1. Create a **new** Supabase Free project; do not use the existing FR Channel project. The Free tier currently includes 500 MB database, 1 GB file storage and 5 GB egress. This is appropriate for an alpha, not a production uptime promise.
 2. Run [`supabase/schema.sql`](supabase/schema.sql) in its SQL Editor. Confirm all three `anychannel_*` tables have RLS enabled and the `anychannel-media` bucket exists.
-3. In Authentication → URL Configuration, set `https://dev.partners.flatreality.eu` as Site URL and add `http://localhost:5173/**` and the production URL to redirect allowlist. Keep email confirmation enabled.
+3. In Authentication → URL Configuration, set `https://flat-reality.github.io/FRSDK_Webapp/` as Site URL and add `http://localhost:5173/**` and the production URL to redirect allowlist. Keep email confirmation enabled.
 4. Copy `.env.example` to `.env.local` and fill `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. The publishable key is safe in the browser; **never** put `service_role`, secret keys or storage S3 credentials in Vite variables.
-5. In the GitHub repository settings, add the same two values as Actions **variables**, select GitHub Actions as Pages source, and set the custom domain to `dev.partners.flatreality.eu`. Point its DNS CNAME at `flat-reality.github.io` (confirm the correct GitHub Pages hostname in repository settings). `public/CNAME` is copied into the build.
+5. In the GitHub repository settings, add the same two values as Actions **variables** and select GitHub Actions as the Pages source. The site is published at `https://flat-reality.github.io/FRSDK_Webapp/`.
 
 Supabase Storage standard uploads are used for MVP media. This keeps starting cost at €0 without requiring Cloudflare R2 billing setup. A file is max 6 MB; originals are served via Supabase's public Storage URL. The 1 GB meter is an alpha dashboard estimate based on recorded uploads, not an authoritative paid-plan entitlement; production quota enforcement must move server-side before charging customers. A private draft's media URL is public to anyone who has the unguessable URL, so do not upload confidential material in this alpha.
 
