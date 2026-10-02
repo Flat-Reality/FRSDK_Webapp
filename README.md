@@ -2,6 +2,8 @@
 
 The first dashboard MVP: account + organization, transmission CRUD, FR Channel-style Editor.js story, cover and inline image uploads, scheduled/draft status, usage card and a responsive/collapsible workspace UI. It intentionally has **no categories, delivery channels, game bindings, widget or billing integration** yet. Those belong to the next phase. The existing `flatreality.eu` FR Channel is not modified or migrated.
 
+GitHub Pages: <https://flat-reality.github.io/FRSDK_Webapp/>. No custom domain is configured.
+
 > **Supabase location:** this app uses the `AnyChannel Cloud Alpha` project (`ecuslqjmsapmswaklpqa`) inside the **Flat Reality Cluster 2** organization. It does not use the original Flat Reality organization, `FRWorkspace`, or the existing `FR Channel` project. Keep future AnyChannel migrations in Cluster 2 unless the architecture is deliberately changed.
 
 ## Run locally
@@ -19,9 +21,9 @@ Without environment variables the app runs in a clearly marked local demo mode. 
 
 1. The **Flat Reality Cluster 2 → AnyChannel Cloud Alpha** Supabase Free project is the alpha backend. Do not use the existing FR Channel project. The Free tier is appropriate for an alpha, not a production uptime promise.
 2. The versioned `initialize_anychannel_alpha` and `index_anychannel_media_owner` migrations are already applied. [`supabase/schema.sql`](supabase/schema.sql) remains the readable schema reference. Confirm all three `anychannel_*` tables have RLS enabled and the `anychannel-media` bucket exists before applying future changes.
-3. Auth is configured for local development only: Site URL `http://localhost:5173` and redirect allowlist entry `http://localhost:5173/**`. Keep email confirmation enabled.
+3. Auth Site URL is `https://flat-reality.github.io/FRSDK_Webapp/`. Redirects allow that exact production URL plus `http://localhost:5173/**` for development. Keep email confirmation enabled.
 4. Copy `.env.example` to `.env.local` and fill `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. The publishable key is safe in the browser; **never** put `service_role`, secret keys or storage S3 credentials in Vite variables.
-5. Cloud-connected alpha testing is local-only for now. No custom domain is configured.
+5. GitHub Pages deploys from `main` at `https://flat-reality.github.io/FRSDK_Webapp/`; no custom domain is configured.
 
 Supabase Storage standard uploads are used for MVP media. This keeps starting cost at €0 without requiring Cloudflare R2 billing setup. A file is max 6 MB; originals are served via Supabase's public Storage URL. The 1 GB meter is an alpha dashboard estimate based on recorded uploads, not an authoritative paid-plan entitlement; production quota enforcement must move server-side before charging customers. A private draft's media URL is public to anyone who has the unguessable URL, so do not upload confidential material in this alpha.
 

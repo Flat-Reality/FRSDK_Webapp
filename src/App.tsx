@@ -101,7 +101,8 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (session: Session) =
     setBusy(true); setMessage('')
     try {
       if (mode === 'signup') {
-        const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { name: name.trim(), organization: organization.trim() }, emailRedirectTo: location.origin } })
+        const emailRedirectTo = new URL(import.meta.env.BASE_URL, location.origin).toString()
+        const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { name: name.trim(), organization: organization.trim() }, emailRedirectTo } })
         if (error) throw error
         if (data.session) onAuthenticated(data.session)
         else setMessage('Check your email to confirm the account, then sign in.')
