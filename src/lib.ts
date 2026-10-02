@@ -1,8 +1,9 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import type { Database, Json } from './database.types'
 
 const url = import.meta.env.VITE_SUPABASE_URL
 const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
-export const supabase: SupabaseClient | null = url && key ? createClient(url, key) : null
+export const supabase: SupabaseClient<Database> | null = url && key ? createClient<Database>(url, key) : null
 export const demoMode = !supabase
 
 export type Transmission = {
@@ -11,7 +12,7 @@ export type Transmission = {
   title: string
   slug: string
   excerpt: string
-  content: { blocks: Array<{ type: string; data: Record<string, unknown> }> }
+  content: { blocks: Array<{ type: string; data: Record<string, Json | undefined> }> }
   cover_url: string | null
   cover_path: string | null
   status: 'draft' | 'scheduled' | 'published'

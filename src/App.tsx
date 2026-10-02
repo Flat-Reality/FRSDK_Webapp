@@ -177,7 +177,7 @@ export default function App() {
   async function saveTransmission(input: Partial<Transmission>, requestedStatus: 'draft' | 'published') {
     if (profile?.plan === 'expired') throw new Error('Your cloud workspace is read-only.')
     const date = input.published_at ? new Date(input.published_at) : new Date()
-    const status = requestedStatus === 'draft' ? 'draft' : date.getTime() > Date.now() ? 'scheduled' : 'published'
+    const status: Transmission['status'] = requestedStatus === 'draft' ? 'draft' : date.getTime() > Date.now() ? 'scheduled' : 'published'
     const timestamp = new Date().toISOString()
     const record = { title: input.title?.trim() || 'Untitled transmission', slug: slugify(input.slug || input.title || ''), excerpt: input.excerpt || 'Draft in progress.', content: input.content || { blocks: [] }, cover_url: input.cover_url || null, cover_path: input.cover_path || null, status, published_at: requestedStatus === 'draft' ? null : date.toISOString(), updated_at: timestamp }
     if (!record.slug) record.slug = `untitled-${Date.now()}`

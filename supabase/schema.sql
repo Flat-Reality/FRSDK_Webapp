@@ -40,6 +40,9 @@ create table if not exists public.anychannel_media (
   check (split_part(object_path, '/', 1) = owner_id::text)
 );
 
+create index if not exists anychannel_media_owner_created_idx
+  on public.anychannel_media (owner_id, created_at desc);
+
 alter table public.anychannel_profiles enable row level security;
 alter table public.anychannel_transmissions enable row level security;
 alter table public.anychannel_media enable row level security;
