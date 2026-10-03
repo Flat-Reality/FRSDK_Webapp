@@ -37,6 +37,8 @@ The dashboard is static and GitHub Pages-compatible. Supabase Auth issues user s
 
 `anychannel_apps` stores user-created destinations and opaque public App IDs; `anychannel_transmission_apps` stores delivery assignments. Neither FR's internal categories nor FR's special routes become customer defaults. The Unity technical package lives beside this repository at `FRSDK_Channel`; a downloadable snapshot is published from `public/downloads/com.flatreality.channel.zip`.
 
+Apps can be deleted from their detail page. Database cascades remove only delivery assignments; transmissions remain intact. The public `anychannel-delivery` Edge Function on Supabase **Cluster 2** exposes schema `1.0` manifests by opaque App ID, filters out drafts and not-yet-due scheduled content, and is the domain-independent runtime endpoint used by Unity. Dashboard links continue to support `https://dev.flatreality.eu/` as primary and GitHub Pages as fallback.
+
 Billing is intentionally nonfunctional; `€9/month` is labeled as planned pricing. No checkout or payment data is collected. The published/scheduled status in this alpha is editorial metadata; it is **not yet a public delivery guarantee**.
 
 ## Planned integrations — do not implement yet
