@@ -6,6 +6,7 @@ create table if not exists public.anychannel_profiles (
   owner_id uuid primary key references auth.users(id) on delete cascade,
   name text not null check (char_length(name) between 1 and 80),
   organization text not null check (char_length(organization) between 1 and 120),
+  github_url text check (github_url is null or github_url ~ '^https://github\\.com/[A-Za-z0-9-]+/?$'),
   plan text not null default 'cloud_trial' check (plan in ('cloud_trial', 'cloud', 'expired')),
   created_at timestamptz not null default now()
 );
@@ -14,7 +15,7 @@ create table if not exists public.anychannel_transmissions (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid not null references auth.users(id) on delete cascade,
   title text not null check (char_length(title) between 1 and 160),
-  slug text not null check (slug ~ '^[a-z0-9]+(?:-[a-z0-9]+)*$'),
+  slug text not null check (slug ~ '^[a-z0-9]+(?:[_-][a-z0-9]+)*$'),
   excerpt text not null default 'Draft in progress.' check (char_length(excerpt) between 1 and 320),
   content jsonb not null default '{"blocks":[]}'::jsonb check (jsonb_typeof(content->'blocks') = 'array'),
   cover_url text,
@@ -29,6 +30,32 @@ create table if not exists public.anychannel_transmissions (
 
 create index if not exists anychannel_transmissions_owner_updated_idx
   on public.anychannel_transmissions (owner_id, updated_at desc);
+
+create table if not exists public.anychannel_apps (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  app_id text not null unique default ('app_' || replace(gen_random_uuid()::text, '-', ''))
+    check (app_id ~ '^app_[a-f0-9]{32}$'),
+  name text not null check (char_length(name) between 1 and 80),
+  app_type text not null check (app_type in ('game', 'webapp')),
+  icon_url text,
+  icon_path text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists anychannel_apps_owner_updated_idx
+  on public.anychannel_apps (owner_id, updated_at desc);
+
+create table if not exists public.anychannel_transmission_apps (
+  transmission_id uuid not null references public.anychannel_transmissions(id) on delete cascade,
+  app_id uuid not null references public.anychannel_apps(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (transmission_id, app_id)
+);
+
+create index if not exists anychannel_transmission_apps_app_idx
+  on public.anychannel_transmission_apps (app_id, transmission_id);
 
 create table if not exists public.anychannel_media (
   id uuid primary key default gen_random_uuid(),
@@ -46,6 +73,8 @@ create index if not exists anychannel_media_owner_created_idx
 alter table public.anychannel_profiles enable row level security;
 alter table public.anychannel_transmissions enable row level security;
 alter table public.anychannel_media enable row level security;
+alter table public.anychannel_apps enable row level security;
+alter table public.anychannel_transmission_apps enable row level security;
 
 -- Explicit grants are required on newer Supabase projects; grants never replace RLS.
 revoke all on public.anychannel_profiles from anon, authenticated;
@@ -54,8 +83,11 @@ revoke all on public.anychannel_media from anon, authenticated;
 grant select on public.anychannel_profiles to authenticated;
 grant insert (owner_id, name, organization) on public.anychannel_profiles to authenticated;
 grant update (name, organization) on public.anychannel_profiles to authenticated;
+grant update (name, organization, github_url) on public.anychannel_profiles to authenticated;
 grant select, insert, update, delete on public.anychannel_transmissions to authenticated;
 grant select, insert on public.anychannel_media to authenticated;
+grant select, insert, update, delete on public.anychannel_apps to authenticated;
+grant select, insert, delete on public.anychannel_transmission_apps to authenticated;
 
 create policy "Read own AnyChannel profile" on public.anychannel_profiles
   for select to authenticated using (owner_id = (select auth.uid()));
@@ -74,6 +106,34 @@ create policy "Update own AnyChannel transmissions" on public.anychannel_transmi
   with check (owner_id = (select auth.uid()));
 create policy "Delete own AnyChannel transmissions" on public.anychannel_transmissions
   for delete to authenticated using (owner_id = (select auth.uid()));
+
+create policy "Read own AnyChannel apps" on public.anychannel_apps
+  for select to authenticated using (owner_id = (select auth.uid()));
+create policy "Create own AnyChannel apps" on public.anychannel_apps
+  for insert to authenticated with check (owner_id = (select auth.uid()));
+create policy "Update own AnyChannel apps" on public.anychannel_apps
+  for update to authenticated using (owner_id = (select auth.uid()))
+  with check (owner_id = (select auth.uid()));
+create policy "Delete own AnyChannel apps" on public.anychannel_apps
+  for delete to authenticated using (owner_id = (select auth.uid()));
+
+create policy "Read own transmission app links" on public.anychannel_transmission_apps
+  for select to authenticated using (
+    exists (select 1 from public.anychannel_transmissions t
+      where t.id = anychannel_transmission_apps.transmission_id and t.owner_id = (select auth.uid()))
+  );
+create policy "Create own transmission app links" on public.anychannel_transmission_apps
+  for insert to authenticated with check (
+    exists (select 1 from public.anychannel_transmissions t
+      where t.id = anychannel_transmission_apps.transmission_id and t.owner_id = (select auth.uid()))
+    and exists (select 1 from public.anychannel_apps a
+      where a.id = anychannel_transmission_apps.app_id and a.owner_id = (select auth.uid()))
+  );
+create policy "Delete own transmission app links" on public.anychannel_transmission_apps
+  for delete to authenticated using (
+    exists (select 1 from public.anychannel_transmissions t
+      where t.id = anychannel_transmission_apps.transmission_id and t.owner_id = (select auth.uid()))
+  );
 
 create policy "Read own AnyChannel media records" on public.anychannel_media
   for select to authenticated using (owner_id = (select auth.uid()));

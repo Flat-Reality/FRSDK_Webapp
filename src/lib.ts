@@ -4,7 +4,8 @@ import type { Database, Json } from './database.types'
 const url = import.meta.env.VITE_SUPABASE_URL
 const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
 export const supabase: SupabaseClient<Database> | null = url && key ? createClient<Database>(url, key) : null
-export const demoMode = !supabase
+const localDemo = import.meta.env.DEV && typeof location !== 'undefined' && new URLSearchParams(location.search).has('demo')
+export const demoMode = !supabase || localDemo
 
 export type Transmission = {
   id: string
@@ -21,7 +22,37 @@ export type Transmission = {
   updated_at: string
 }
 
-export type Profile = { owner_id: string; name: string; organization: string; plan: 'cloud_trial' | 'cloud' | 'expired'; created_at: string }
+export type Profile = { owner_id: string; name: string; organization: string; github_url: string | null; plan: 'cloud_trial' | 'cloud' | 'expired'; created_at: string }
+
+export type ChannelApp = {
+  id: string
+  owner_id: string
+  app_id: string
+  name: string
+  app_type: 'game' | 'webapp'
+  icon_url: string | null
+  icon_path: string | null
+  created_at: string
+  updated_at: string
+}
+
+export const DASHBOARD_PRIMARY_URL = 'https://dev.flatreality.eu/'
+export const DASHBOARD_FALLBACK_URL = 'https://flat-reality.github.io/FRSDK_Webapp/'
+export const TRANSMISSION_MONTHLY_LIMIT = 100
+
+export function githubAvatarUrl(value?: string | null) {
+  if (!value) return ''
+  try {
+    const url = new URL(value.startsWith('http') ? value : `https://github.com/${value}`)
+    if (!/(^|\.)github\.com$/i.test(url.hostname)) return ''
+    const username = url.pathname.split('/').filter(Boolean)[0]
+    return username ? `https://github.com/${encodeURIComponent(username)}.png?size=160` : ''
+  } catch { return '' }
+}
+
+export function createPublicAppId() {
+  return `app_${crypto.randomUUID().replaceAll('-', '')}`
+}
 
 export const slugify = (text: string) => text.toLowerCase().normalize('NFKD')
   .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-')
@@ -46,3 +77,5 @@ export const demoPosts: Transmission[] = [
   { id: 'demo-1', owner_id: 'demo', title: 'Welcome to AnyChannel', slug: 'welcome-to-anychannel', excerpt: 'A new space for updates, stories and everything that matters across your worlds.', content: { blocks: [{ type: 'paragraph', data: { text: 'A new space for updates, stories and everything that matters across your worlds.' } }] }, cover_url: null, cover_path: null, status: 'published', published_at: now, created_at: now, updated_at: now },
   { id: 'demo-2', owner_id: 'demo', title: 'Your next transmission', slug: 'your-next-transmission', excerpt: 'Draft your story here, then decide when to publish it.', content: { blocks: [{ type: 'paragraph', data: { text: 'Draft your story here, then decide when to publish it.' } }] }, cover_url: null, cover_path: null, status: 'draft', published_at: null, created_at: now, updated_at: now }
 ]
+
+export const demoApps: ChannelApp[] = []

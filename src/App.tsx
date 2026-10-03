@@ -1,299 +1,139 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import type EditorJS from '@editorjs/editorjs'
-import { ArrowLeft, ArrowRight, CalendarDays, ChevronDown, ChevronRight, Cloud, CreditCard, FileText, Image as ImageIcon, LayoutGrid, LogOut, MoreHorizontal, PanelLeftClose, Plus, Search, Settings2, Trash2, UserRound, X } from 'lucide-react'
-import { demoMode, demoPosts, excerptFromBlocks, slugify, supabase, type Profile, type Transmission } from './lib'
+import { ArrowLeft, ArrowRight, Box, CalendarDays, Check, ChevronDown, ChevronRight, Cloud, Copy, CreditCard, FileText, Gamepad2, Gift, Globe2, Image as ImageIcon, LayoutGrid, LogOut, MoreHorizontal, PanelLeftClose, Plus, Search, Settings2, UserRound, X } from 'lucide-react'
+import { createPublicAppId, DASHBOARD_FALLBACK_URL, DASHBOARD_PRIMARY_URL, demoApps, demoMode, demoPosts, excerptFromBlocks, githubAvatarUrl, slugify, supabase, TRANSMISSION_MONTHLY_LIMIT, type ChannelApp, type Profile, type Transmission } from './lib'
 
-type View = 'home' | 'editor' | 'account' | 'billing' | 'usage'
+type View = 'home' | 'editor' | 'apps' | 'account' | 'billing' | 'usage' | 'compliments'
 type Filter = 'all' | Transmission['status']
-const DEMO_KEY = 'frsdk-anychannel-demo-v1'
-const GB = 1024 * 1024 * 1024
+const POSTS_KEY = 'frsdk-anychannel-demo-v2'
+const APPS_KEY = 'frsdk-anychannel-apps-v1'
+const LINKS_KEY = 'frsdk-anychannel-links-v1'
+const logoUrl = `${import.meta.env.BASE_URL}assets/SDKIcon.png`
 
-function readDemo(): Transmission[] {
-  try {
-    const value = localStorage.getItem(DEMO_KEY)
-    return value ? JSON.parse(value) as Transmission[] : demoPosts
-  } catch { return demoPosts }
-}
+function readLocal<T>(key: string, fallback: T): T { try { const value = localStorage.getItem(key); return value ? JSON.parse(value) as T : fallback } catch { return fallback } }
+function formatDate(value: string | null) { return value ? new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'No publication date' }
+function localDateValue(value?: string | null) { const date = value ? new Date(value) : new Date(); return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16) }
+function statusLabel(post: Transmission) { return post.status[0].toUpperCase() + post.status.slice(1) }
 
-function formatDate(value: string | null) {
-  if (!value) return 'No publication date'
-  return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-}
+function Brand({ compact = false }: { compact?: boolean }) { return <><img className="brand-icon" src={logoUrl} alt="" />{!compact && <span className="brand-wordmark">Flat Reality SDK</span>}</> }
+function Avatar({ profile, className = '' }: { profile: Profile | null; className?: string }) { const src = githubAvatarUrl(profile?.github_url); return <span className={`avatar ${className}`}>{src ? <img src={src} alt="" /> : (profile?.name || 'D')[0].toUpperCase()}</span> }
+function AppIcon({ app, size = '' }: { app: ChannelApp; size?: string }) { return <span className={`channel-icon ${size}`}>{app.icon_url ? <img src={app.icon_url} alt="" /> : app.app_type === 'game' ? <Gamepad2 /> : <Globe2 />}</span> }
 
-function localDateValue(value?: string | null) {
-  const date = value ? new Date(value) : new Date()
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
-}
-
-function statusLabel(post: Transmission) {
-  return post.status[0].toUpperCase() + post.status.slice(1)
-}
-
-async function uploadMedia(file: File, ownerId: string, bytesUsed: number): Promise<{ url: string; path: string }> {
+async function uploadMedia(file: File, ownerId: string): Promise<{ url: string; path: string }> {
   if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) throw new Error('Use JPG, PNG, WebP or GIF.')
   if (file.size > 6 * 1024 * 1024) throw new Error('Images must be 6 MB or smaller.')
-  if (bytesUsed + file.size > GB) throw new Error('The 1 GB media allowance would be exceeded.')
   if (!supabase) {
-    if (file.size > 1 * 1024 * 1024) throw new Error('Demo images must be under 1 MB to fit in local browser storage.')
+    if (file.size > 1024 * 1024) throw new Error('Demo images must be under 1 MB.')
     return { url: await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(file) }), path: '' }
   }
   const extension = file.type === 'image/jpeg' ? 'jpg' : file.type.split('/')[1]
   const path = `${ownerId}/${crypto.randomUUID()}.${extension}`
-  const uploaded = await supabase.storage.from('anychannel-media').upload(path, file, { cacheControl: '31536000', upsert: false, contentType: file.type })
+  const uploaded = await supabase.storage.from('anychannel-media').upload(path, file, { cacheControl: '31536000', contentType: file.type })
   if (uploaded.error) throw uploaded.error
   const record = await supabase.from('anychannel_media').insert({ owner_id: ownerId, object_path: path, size_bytes: file.size, mime_type: file.type })
-  if (record.error) {
-    await supabase.storage.from('anychannel-media').remove([path])
-    throw record.error
-  }
+  if (record.error) { await supabase.storage.from('anychannel-media').remove([path]); throw record.error }
   return { url: supabase.storage.from('anychannel-media').getPublicUrl(path).data.publicUrl, path }
 }
 
 function StoryEditor({ content, onReady, onUpload }: { content: Transmission['content']; onReady: (editor: EditorJS | null) => void; onUpload: (file: File) => Promise<{ url: string }> }) {
-  const holder = useRef<HTMLDivElement>(null)
-  const editor = useRef<EditorJS | null>(null)
+  const holder = useRef<HTMLDivElement>(null); const editor = useRef<EditorJS | null>(null)
   useEffect(() => {
     let cancelled = false
     async function create() {
-      const [{ default: Editor }, { default: Header }, { default: List }, { default: Image }, { default: Embed }, { default: Delimiter }, { default: Quote }, { default: Raw }] = await Promise.all([
-        import('@editorjs/editorjs'), import('@editorjs/header'), import('@editorjs/list'), import('@editorjs/image'), import('@editorjs/embed'), import('@editorjs/delimiter'), import('@editorjs/quote'), import('@editorjs/raw')
-      ])
+      const [{ default: Editor }, { default: Header }, { default: List }, { default: Image }, { default: Embed }, { default: Delimiter }, { default: Quote }, { default: Raw }] = await Promise.all([import('@editorjs/editorjs'), import('@editorjs/header'), import('@editorjs/list'), import('@editorjs/image'), import('@editorjs/embed'), import('@editorjs/delimiter'), import('@editorjs/quote'), import('@editorjs/raw')])
       if (cancelled || !holder.current) return
-      const instance = new Editor({
-        holder: holder.current,
-        placeholder: 'Tell the story…',
-        data: content,
-        inlineToolbar: ['bold', 'italic', 'link'],
-        tools: {
-          header: { class: Header, config: { levels: [2, 3, 4], defaultLevel: 2 } },
-          list: { class: List, inlineToolbar: true },
-          image: { class: Image, config: { types: 'image/jpeg,image/png,image/webp,image/gif', uploader: { uploadByFile: async (file: File) => ({ success: 1, file: await onUpload(file) }) } } },
-          embed: { class: Embed, config: { services: { youtube: true, vimeo: true, twitch: true } } },
-          delimiter: Delimiter,
-          quote: { class: Quote, inlineToolbar: true },
-          raw: Raw
-        }
-      })
-      editor.current = instance
-      await instance.isReady
-      if (!cancelled) onReady(instance)
+      const instance = new Editor({ holder: holder.current, placeholder: 'Tell the story…', data: content, inlineToolbar: ['bold', 'italic', 'link'], tools: { header: { class: Header, config: { levels: [2, 3, 4], defaultLevel: 2 } }, list: { class: List, inlineToolbar: true }, image: { class: Image, config: { types: 'image/jpeg,image/png,image/webp,image/gif', uploader: { uploadByFile: async (file: File) => ({ success: 1, file: await onUpload(file) }) } } }, embed: { class: Embed, config: { services: { youtube: true, vimeo: true, twitch: true } } }, delimiter: Delimiter, quote: { class: Quote, inlineToolbar: true }, raw: Raw } })
+      editor.current = instance; await instance.isReady; if (!cancelled) onReady(instance)
     }
-    create().catch(error => console.error('Editor failed to start', error))
-    return () => { cancelled = true; onReady(null); if (editor.current) { editor.current.isReady.then(() => editor.current?.destroy()).catch(() => {}); editor.current = null } }
-  // This component is remounted with a post-specific key when switching transmissions.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    create().catch(console.error)
+    return () => { cancelled = true; onReady(null); editor.current?.isReady.then(() => editor.current?.destroy()).catch(() => {}) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   return <div ref={holder} className="story-editor" />
 }
 
 function AuthScreen({ onAuthenticated }: { onAuthenticated: (session: Session) => void }) {
-  const [mode, setMode] = useState<'login' | 'signup'>('signup')
-  const [name, setName] = useState('')
-  const [organization, setOrganization] = useState('')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState('')
+  const [mode, setMode] = useState<'login' | 'signup'>('signup'); const [name, setName] = useState(''); const [organization, setOrganization] = useState(''); const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [busy, setBusy] = useState(false); const [message, setMessage] = useState('')
   async function submit(event: React.FormEvent) {
-    event.preventDefault()
-    if (!supabase) return
-    setBusy(true); setMessage('')
+    event.preventDefault(); if (!supabase) return; setBusy(true); setMessage('')
     try {
-      if (mode === 'signup') {
-        const emailRedirectTo = new URL(import.meta.env.BASE_URL, location.origin).toString()
-        const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { name: name.trim(), organization: organization.trim() }, emailRedirectTo } })
-        if (error) throw error
-        if (data.session) onAuthenticated(data.session)
-        else setMessage('Check your email to confirm the account, then sign in.')
-      } else {
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-        if (error) throw error
-        if (data.session) onAuthenticated(data.session)
-      }
-    } catch (error) { setMessage(error instanceof Error ? error.message : 'Authentication failed.') }
-    finally { setBusy(false) }
+      if (mode === 'signup') { const emailRedirectTo = new URL(import.meta.env.BASE_URL, location.origin).toString(); const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { name: name.trim(), organization: organization.trim() }, emailRedirectTo } }); if (error) throw error; if (data.session) onAuthenticated(data.session); else setMessage('Check your email to confirm the account, then sign in.') }
+      else { const { data, error } = await supabase.auth.signInWithPassword({ email, password }); if (error) throw error; if (data.session) onAuthenticated(data.session) }
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Authentication failed.') } finally { setBusy(false) }
   }
-  return <div className="auth-shell"><div className="auth-brand"><div className="brand-icon">F<span>R</span></div><span>FLAT REALITY<br /><b>SDK</b></span></div><form className="auth-card" onSubmit={submit}><div className="eyebrow">ANYCHANNEL CLOUD</div><h1>{mode === 'signup' ? 'Create your workspace.' : 'Welcome back.'}</h1><p>One place to compose your transmissions.</p>{mode === 'signup' && <><label>Your name<input required maxLength={80} value={name} onChange={e => setName(e.target.value)} placeholder="Alex Morgan" /></label><label>Organization<input required maxLength={120} value={organization} onChange={e => setOrganization(e.target.value)} placeholder="Your studio" /></label></>}<label>Email<input required type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@studio.com" /></label><label>Password<input required minLength={8} type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" /></label><button className="primary full" disabled={busy}>{busy ? 'Please wait…' : mode === 'signup' ? 'Create account' : 'Sign in'} <ArrowRight size={17} /></button>{message && <div className="notice">{message}</div>}<button className="text-button" type="button" onClick={() => { setMode(mode === 'signup' ? 'login' : 'signup'); setMessage('') }}>{mode === 'signup' ? 'Already have an account? Sign in' : 'New to AnyChannel? Create an account'}</button></form><span className="auth-foot">FLAT REALITY PARTNERS · BUILD YOUR WORLD</span></div>
+  return <div className="auth-shell"><div className="auth-brand"><Brand /></div><form className="auth-card" onSubmit={submit}><div className="eyebrow accent-text">ANYCHANNEL CLOUD</div><h1>{mode === 'signup' ? 'Create your workspace.' : 'Welcome back.'}</h1><p>One place to compose and deliver your transmissions.</p>{mode === 'signup' && <><label>Your name<input required maxLength={80} value={name} onChange={e => setName(e.target.value)} placeholder="Alex Morgan" /></label><label>Organization<input required maxLength={120} value={organization} onChange={e => setOrganization(e.target.value)} placeholder="Your studio" /></label></>}<label>Email<input required type="email" value={email} onChange={e => setEmail(e.target.value)} /></label><label>Password<input required minLength={8} type="password" value={password} onChange={e => setPassword(e.target.value)} /></label><button className="primary full" disabled={busy}>{busy ? 'Please wait…' : mode === 'signup' ? 'Create account' : 'Sign in'} <ArrowRight /></button>{message && <div className="notice">{message}</div>}<button className="text-button" type="button" onClick={() => setMode(mode === 'signup' ? 'login' : 'signup')}>{mode === 'signup' ? 'Already have an account? Sign in' : 'New here? Create an account'}</button></form></div>
 }
 
 export default function App() {
-  const [session, setSession] = useState<Session | null>(null)
-  const [authLoaded, setAuthLoaded] = useState(demoMode)
-  const [profile, setProfile] = useState<Profile | null>(demoMode ? { owner_id: 'demo', name: 'Demo user', organization: 'Your studio', plan: 'cloud_trial', created_at: new Date().toISOString() } : null)
-  const [posts, setPosts] = useState<Transmission[]>(demoMode ? readDemo() : [])
-  const [view, setView] = useState<View>('home')
-  const [editing, setEditing] = useState<Transmission | null>(null)
-  const [filter, setFilter] = useState<Filter>('all')
-  const [search, setSearch] = useState('')
-  const [collapsed, setCollapsed] = useState(() => window.innerWidth <= 800)
-  const [notice, setNotice] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [mediaBytes, setMediaBytes] = useState(0)
+  const [session, setSession] = useState<Session | null>(null); const [authLoaded, setAuthLoaded] = useState(demoMode)
+  const [profile, setProfile] = useState<Profile | null>(demoMode ? { owner_id: 'demo', name: 'Demo user', organization: 'Your studio', github_url: null, plan: 'cloud_trial', created_at: new Date().toISOString() } : null)
+  const [posts, setPosts] = useState<Transmission[]>(demoMode ? readLocal(POSTS_KEY, demoPosts) : []); const [apps, setApps] = useState<ChannelApp[]>(demoMode ? readLocal(APPS_KEY, demoApps) : []); const [postApps, setPostApps] = useState<Record<string, string[]>>(demoMode ? readLocal(LINKS_KEY, {}) : {})
+  const [view, setView] = useState<View>('home'); const [editing, setEditing] = useState<Transmission | null>(null); const [selectedApp, setSelectedApp] = useState<ChannelApp | null>(null); const [creatingApp, setCreatingApp] = useState(false); const [filter, setFilter] = useState<Filter>('all'); const [search, setSearch] = useState(''); const [collapsed, setCollapsed] = useState(() => innerWidth <= 900); const [notice, setNotice] = useState(''); const [busy, setBusy] = useState(false); const [delivered, setDelivered] = useState(false)
   const ownerId = session?.user.id || 'demo'
 
+  useEffect(() => { if (!supabase) return; const client = supabase; client.auth.getSession().then(({ data }) => { setSession(data.session); setAuthLoaded(true) }); const { data } = client.auth.onAuthStateChange((_event, next) => setSession(next)); return () => data.subscription.unsubscribe() }, [])
   useEffect(() => {
-    if (!supabase) return
-    const client = supabase
-    client.auth.getSession().then(({ data }) => { setSession(data.session); setAuthLoaded(true) })
-    const { data: listener } = client.auth.onAuthStateChange((_event, next) => setSession(next))
-    return () => listener.subscription.unsubscribe()
-  }, [])
-
-  useEffect(() => {
-    if (!supabase || !session) return
-    const client = supabase
-    let cancelled = false
-    async function load() {
-      const id = session!.user.id
-      const [{ data: current, error: profileError }, { data: items, error: postError }, { data: media }] = await Promise.all([
-        client.from('anychannel_profiles').select('*').eq('owner_id', id).maybeSingle(),
-        client.from('anychannel_transmissions').select('*').order('updated_at', { ascending: false }),
-        client.from('anychannel_media').select('size_bytes')
-      ])
-      if (profileError || postError) { if (!cancelled) setNotice((profileError || postError)?.message || 'Unable to load workspace.'); return }
-      let nextProfile = current as Profile | null
-      if (!nextProfile) {
-        const metadata = session!.user.user_metadata || {}
-        const result = await client.from('anychannel_profiles').insert({ owner_id: id, name: String(metadata.name || '').slice(0, 80), organization: String(metadata.organization || '').slice(0, 120) }).select().single()
-        if (result.error) { if (!cancelled) setNotice(result.error.message); return }
-        nextProfile = result.data as Profile
-      }
-      if (!cancelled) { setProfile(nextProfile); setPosts((items || []) as Transmission[]); setMediaBytes((media || []).reduce((sum, item) => sum + (item.size_bytes || 0), 0)) }
-    }
-    load()
-    return () => { cancelled = true }
+    if (!supabase || !session) return; const client = supabase; let cancelled = false
+    Promise.all([client.from('anychannel_profiles').select('*').eq('owner_id', session.user.id).maybeSingle(), client.from('anychannel_transmissions').select('*').eq('owner_id', session.user.id).order('updated_at', { ascending: false }), client.from('anychannel_apps').select('*').eq('owner_id', session.user.id).order('updated_at', { ascending: false }), client.from('anychannel_transmission_apps').select('*')]).then(async ([profileResult, postResult, appResult, linkResult]) => {
+      const error = profileResult.error || postResult.error || appResult.error || linkResult.error; if (error) { if (!cancelled) setNotice(error.message); return }
+      let nextProfile = profileResult.data as Profile | null
+      if (!nextProfile) { const metadata = session.user.user_metadata || {}; const created = await client.from('anychannel_profiles').insert({ owner_id: session.user.id, name: String(metadata.name || '').slice(0, 80), organization: String(metadata.organization || '').slice(0, 120) }).select().single(); if (created.error) { setNotice(created.error.message); return }; nextProfile = created.data as Profile }
+      const links: Record<string, string[]> = {}; for (const link of linkResult.data || []) (links[link.transmission_id] ||= []).push(link.app_id)
+      if (!cancelled) { setProfile(nextProfile); setPosts((postResult.data || []) as Transmission[]); setApps((appResult.data || []) as ChannelApp[]); setPostApps(links) }
+    }); return () => { cancelled = true }
   }, [session])
+  useEffect(() => { if (demoMode) { localStorage.setItem(POSTS_KEY, JSON.stringify(posts)); localStorage.setItem(APPS_KEY, JSON.stringify(apps)); localStorage.setItem(LINKS_KEY, JSON.stringify(postApps)) } }, [posts, apps, postApps])
 
-  useEffect(() => { if (demoMode) { try { localStorage.setItem(DEMO_KEY, JSON.stringify(posts)) } catch { setNotice('Browser storage is full. Remove large demo images or connect Supabase.') } } }, [posts])
-
-  const visible = useMemo(() => posts.filter(post => {
-    const matches = filter === 'all' || post.status === filter
-    return matches && `${post.title} ${post.excerpt}`.toLowerCase().includes(search.toLowerCase())
-  }), [posts, filter, search])
-
-  function navigate(next: View) { setView(next); if (window.innerWidth <= 800) setCollapsed(true); setNotice('') }
+  const visible = useMemo(() => posts.filter(post => (filter === 'all' || post.status === filter) && `${post.title} ${post.excerpt}`.toLowerCase().includes(search.toLowerCase())), [posts, filter, search])
+  const now = new Date(); const usedThisMonth = posts.filter(post => post.status !== 'draft' && post.published_at && new Date(post.published_at).getMonth() === now.getMonth() && new Date(post.published_at).getFullYear() === now.getFullYear()).length; const remainingPercent = Math.max(0, Math.round((TRANSMISSION_MONTHLY_LIMIT - usedThisMonth) / TRANSMISSION_MONTHLY_LIMIT * 100))
+  function navigate(next: View) { setView(next); setNotice(''); if (next !== 'apps') { setSelectedApp(null); setCreatingApp(false) }; if (innerWidth <= 900) setCollapsed(true) }
   function edit(post: Transmission | null) { setEditing(post); navigate('editor') }
 
-  async function saveTransmission(input: Partial<Transmission>, requestedStatus: 'draft' | 'published') {
-    if (profile?.plan === 'expired') throw new Error('Your cloud workspace is read-only.')
-    const date = input.published_at ? new Date(input.published_at) : new Date()
-    const status: Transmission['status'] = requestedStatus === 'draft' ? 'draft' : date.getTime() > Date.now() ? 'scheduled' : 'published'
-    const timestamp = new Date().toISOString()
-    const record = { title: input.title?.trim() || 'Untitled transmission', slug: slugify(input.slug || input.title || ''), excerpt: input.excerpt || 'Draft in progress.', content: input.content || { blocks: [] }, cover_url: input.cover_url || null, cover_path: input.cover_path || null, status, published_at: requestedStatus === 'draft' ? null : date.toISOString(), updated_at: timestamp }
-    if (!record.slug) record.slug = `untitled-${Date.now()}`
-    if (demoMode) {
-      const item = { ...record, id: editing?.id || crypto.randomUUID(), owner_id: 'demo', created_at: editing?.created_at || timestamp } as Transmission
-      setPosts(current => [item, ...current.filter(post => post.id !== item.id)])
-      navigate('home'); return
-    }
-    if (!supabase || !session) throw new Error('Sign in to save this transmission.')
-    const result = editing
-      ? await supabase.from('anychannel_transmissions').update(record).eq('id', editing.id).select().single()
-      : await supabase.from('anychannel_transmissions').insert({ ...record, owner_id: session.user.id }).select().single()
-    if (result.error) throw result.error
-    setPosts(current => [result.data as Transmission, ...current.filter(post => post.id !== result.data.id)])
-    navigate('home')
+  async function saveTransmission(input: Partial<Transmission>, requestedStatus: 'draft' | 'published', appIds: string[]) {
+    const date = input.published_at ? new Date(input.published_at) : new Date(); const status: Transmission['status'] = requestedStatus === 'draft' ? 'draft' : date > new Date() ? 'scheduled' : 'published'; const timestamp = new Date().toISOString(); const record = { title: input.title?.trim() || 'Untitled transmission', slug: input.slug || `transmission_${Date.now()}`, excerpt: input.excerpt || 'Draft in progress.', content: input.content || { blocks: [] }, cover_url: input.cover_url || null, cover_path: input.cover_path || null, status, published_at: requestedStatus === 'draft' ? null : date.toISOString(), updated_at: timestamp }
+    let saved: Transmission
+    if (demoMode) { saved = { ...record, id: editing?.id || crypto.randomUUID(), owner_id: 'demo', created_at: editing?.created_at || timestamp } as Transmission }
+    else { if (!supabase || !session) throw new Error('Sign in to save.'); const result = editing ? await supabase.from('anychannel_transmissions').update(record).eq('id', editing.id).select().single() : await supabase.from('anychannel_transmissions').insert({ ...record, owner_id: session.user.id }).select().single(); if (result.error) throw result.error; saved = result.data as Transmission; const removed = await supabase.from('anychannel_transmission_apps').delete().eq('transmission_id', saved.id); if (removed.error) throw removed.error; if (appIds.length) { const linked = await supabase.from('anychannel_transmission_apps').insert(appIds.map(app_id => ({ transmission_id: saved.id, app_id }))); if (linked.error) throw linked.error } }
+    setPosts(current => [saved, ...current.filter(post => post.id !== saved.id)]); setPostApps(current => ({ ...current, [saved.id]: appIds })); navigate('home'); if (requestedStatus === 'published') { setDelivered(true); setTimeout(() => setDelivered(false), 1500) }
   }
-
-  async function removePost(post: Transmission) {
-    if (!confirm(`Delete “${post.title}”? This cannot be undone.`)) return
-    if (demoMode) setPosts(current => current.filter(item => item.id !== post.id))
-    else if (supabase) {
-      const result = await supabase.from('anychannel_transmissions').delete().eq('id', post.id)
-      if (result.error) { setNotice(result.error.message); return }
-      setPosts(current => current.filter(item => item.id !== post.id))
-    }
-  }
-
-  async function handleUpload(file: File) {
-    const result = await uploadMedia(file, ownerId, mediaBytes)
-    setMediaBytes(current => current + file.size)
-    return result
-  }
+  async function createApp(value: { name: string; app_type: 'game' | 'webapp'; icon_url: string; icon_path: string }) { const timestamp = new Date().toISOString(); let item: ChannelApp; if (demoMode) item = { id: crypto.randomUUID(), owner_id: 'demo', app_id: createPublicAppId(), ...value, icon_url: value.icon_url || null, icon_path: value.icon_path || null, created_at: timestamp, updated_at: timestamp }; else { if (!supabase || !session) throw new Error('Sign in to create an app.'); const result = await supabase.from('anychannel_apps').insert({ owner_id: session.user.id, ...value, icon_url: value.icon_url || null, icon_path: value.icon_path || null }).select().single(); if (result.error) throw result.error; item = result.data as ChannelApp }; setApps(current => [item, ...current]); setSelectedApp(item); setCreatingApp(false) }
 
   if (!authLoaded) return <div className="loading-screen">Opening Flat Reality SDK…</div>
   if (!demoMode && !session) return <AuthScreen onAuthenticated={setSession} />
-
+  const pageTitle = view === 'home' ? 'Transmissions' : view === 'editor' ? 'Transmission' : view === 'apps' ? 'My apps' : view === 'usage' ? 'Cloud usage' : view === 'billing' ? 'Plan & billing' : view === 'account' ? 'Account' : 'Compliments'
   return <div className={`app-shell ${collapsed ? 'sidebar-collapsed' : ''}`}>
-    {!collapsed && <button className="rail-scrim" aria-label="Collapse sidebar" onClick={() => setCollapsed(true)} />}
-    <aside className="sidebar">
-      <div className="sidebar-top"><button className="brand" aria-label={collapsed ? 'Expand Flat Reality SDK sidebar' : 'Flat Reality SDK home'} onClick={() => collapsed ? setCollapsed(false) : navigate('home')}><span className="brand-icon" aria-hidden="true">F<span>R</span></span>{!collapsed && <span className="brand-wordmark">Flat Reality <strong>SDK</strong></span>}</button>{!collapsed && <button className="sidebar-toggle" aria-label="Collapse sidebar" title="Collapse sidebar" onClick={() => setCollapsed(true)}><PanelLeftClose size={20} strokeWidth={1.8} /></button>}</div>
-      <div className="workspace-switch"><span className="workspace-avatar">{(profile?.organization || 'Y')[0].toUpperCase()}</span>{!collapsed && <><span className="workspace-name"><strong>{profile?.organization || 'Your workspace'}</strong><small>Workspace</small></span><ChevronDown size={15} /></>}</div>
-      <button className="sidebar-create" onClick={() => { edit(null); if (window.innerWidth <= 800) setCollapsed(true) }} title="Create transmission"><Plus size={19} /><span>Create transmission</span></button>
-      <nav className="nav-group"><span className="nav-label">WORKSPACE</span><button className={view === 'home' || view === 'editor' ? 'active' : ''} onClick={() => navigate('home')} title="AnyChannel"><LayoutGrid size={18} /><span>AnyChannel</span></button></nav>
-      <nav className="nav-group settings-nav"><span className="nav-label">SETTINGS</span><button className={view === 'account' ? 'active' : ''} onClick={() => navigate('account')} title="Account"><UserRound size={18} /><span>Account</span></button><button className={view === 'billing' ? 'active' : ''} onClick={() => navigate('billing')} title="Plan & billing"><CreditCard size={18} /><span>Plan & billing</span></button><button className={view === 'usage' ? 'active' : ''} onClick={() => navigate('usage')} title="Cloud usage"><Settings2 size={18} /><span>Cloud usage</span></button></nav>
-      <div className="sidebar-bottom"><div className="sidebar-help"><span className="help-star">✦</span>{!collapsed && <><strong>Crafted for creators.</strong><small>Flat Reality SDK · Preview</small></>}</div><button className="profile-link" onClick={() => navigate('account')}><span className="user-avatar">{(profile?.name || 'D')[0].toUpperCase()}</span>{!collapsed && <><span><strong>{profile?.name || 'Demo user'}</strong><small>{demoMode ? 'Demo workspace' : session?.user.email}</small></span><MoreHorizontal size={17} /></>}</button></div>
-    </aside>
-    <main className="main"><header className="topbar"><div className="breadcrumbs"><span>Workspace</span><ChevronRight size={14} /><strong>{view === 'editor' ? 'New transmission' : view === 'home' ? 'AnyChannel' : view === 'account' ? 'Account' : view === 'billing' ? 'Plan & billing' : 'Cloud usage'}</strong></div><div className="topbar-right"><span className="preview-pill">{demoMode ? 'DEMO MODE' : 'CLOUD ALPHA'}</span><span className="top-avatar">{(profile?.name || 'D')[0].toUpperCase()}</span></div></header>
-      {notice && <div className="global-notice"><span>{notice}</span><button aria-label="Dismiss" onClick={() => setNotice('')}><X size={17} /></button></div>}
-      <div className="content">
-        {view === 'home' && <><div className="page-intro"><div><div className="eyebrow purple">ANYCHANNEL / PUBLISHING</div><h1>Transmissions<span className="soft-dot">.</span></h1><p>Every great story starts with a transmission.</p></div><button className="primary" onClick={() => edit(null)}><Plus size={18} /> New transmission</button></div>
-          <div className="section-row"><div><h2>AnyChannel</h2><p>Compose, schedule and manage your transmissions.</p></div><div className="usage-mini"><div className="usage-mini-head"><Cloud size={16} /><span>Cloud plan</span><b>{Math.min(Math.round(mediaBytes / GB * 100), 100)}%</b></div><div className="progress"><span style={{ width: `${Math.max(mediaBytes > 0 ? 1 : 0, Math.min(mediaBytes / GB * 100, 100))}%` }} /></div><small>{(mediaBytes / 1024 / 1024).toFixed(1)} MB of 1 GB media used this month</small></div></div>
-          <div className="toolbar"><div className="tabs">{(['all', 'published', 'draft', 'scheduled'] as Filter[]).map(tab => <button key={tab} className={filter === tab ? 'selected' : ''} onClick={() => setFilter(tab)}>{tab[0].toUpperCase() + tab.slice(1)} <span>{tab === 'all' ? posts.length : posts.filter(post => post.status === tab).length}</span></button>)}</div><label className="search-box"><Search size={18} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search transmissions" /></label></div>
-          {visible.length ? <div className="post-grid">{visible.map(post => <article className="post-card" key={post.id}><button className="post-cover" onClick={() => edit(post)}>{post.cover_url ? <img src={post.cover_url} alt="" /> : <span className="cover-placeholder"><span>FR<span className="purple-dot">.</span></span><small>TRANSMISSION</small></span>}</button><div className="post-body"><div className="post-meta"><span className={`status ${post.status}`}>{statusLabel(post)}</span><span>{formatDate(post.published_at || post.created_at)}</span></div><button className="post-title" onClick={() => edit(post)}>{post.title}</button><p>{post.excerpt}</p><div className="post-actions"><button onClick={() => edit(post)}>Edit transmission <ArrowRight size={15} /></button><button className="icon-button danger" title="Delete transmission" aria-label={`Delete ${post.title}`} onClick={() => removePost(post)}><Trash2 size={16} /></button></div></div></article>)}</div> : <div className="empty"><FileText size={30} /><h3>No transmissions here yet.</h3><p>Create a new transmission to start telling your story.</p><button className="primary" onClick={() => edit(null)}><Plus size={18} /> New transmission</button></div>}</>}
-        {view === 'editor' && <TransmissionForm key={editing?.id || 'new'} post={editing} busy={busy} onBack={() => navigate('home')} onSave={async (record, status) => { setBusy(true); try { await saveTransmission(record, status) } catch (error) { setNotice(error instanceof Error ? error.message : 'Save failed.'); window.scrollTo({ top: 0, behavior: 'smooth' }) } finally { setBusy(false) } }} onUpload={handleUpload} />}
-        {view === 'account' && <div className="settings-page"><div className="eyebrow purple">SETTINGS / ACCOUNT</div><h1>Account</h1><p>Keep the essentials of your workspace up to date.</p><div className="settings-card"><div><h2>Profile information</h2><p>Your organization is the home for future AnyChannel services.</p></div><AccountForm profile={profile} email={session?.user.email || ''} demo={demoMode} onSaved={setProfile} /></div>{!demoMode && <button className="outline signout" onClick={async () => { await supabase?.auth.signOut(); setSession(null); setProfile(null); setPosts([]) }}><LogOut size={17} /> Sign out</button>}</div>}
-        {view === 'billing' && <div className="settings-page"><div className="eyebrow purple">SETTINGS / BILLING</div><h1>Plan & billing</h1><p>A transparent home for your Cloud plan.</p><div className="settings-card billing-card"><div className="plan-icon"><Cloud size={23} /></div><div><span className="plan-caption">CURRENT PLAN</span><h2>{demoMode ? 'Preview workspace' : 'Cloud alpha'}</h2><p>Billing is not connected in this first MVP. No payment details are collected and no charges will be made.</p></div><span className="coming-soon">Coming later</span></div><div className="settings-card price-card"><div><h2>Planned Cloud pricing</h2><p>One account. Your future distribution channels won't be billed individually.</p></div><strong>€9 <small>/ month</small></strong></div></div>}
-        {view === 'usage' && <div className="settings-page"><div className="eyebrow purple">SETTINGS / USAGE</div><h1>Cloud usage</h1><p>See how much media your workspace stores.</p><div className="settings-card usage-card"><div className="usage-stat"><span>Media storage</span><strong>{(mediaBytes / 1024 / 1024).toFixed(1)} MB <small>/ 1 GB</small></strong></div><div className="progress"><span style={{ width: `${Math.min(mediaBytes / GB * 100, 100)}%` }} /></div><p>For the free alpha, images are limited to 6 MB each. This meter counts uploads recorded by the dashboard; the provider’s project limits still apply.</p></div><div className="settings-card"><div><h2>Delivery channels</h2><p>Channel creation and game/widget connections are reserved for the next phase. No Flat Reality internal categories are applied to customer workspaces.</p></div><span className="coming-soon">Next phase</span></div></div>}
-      </div>
-    </main>
+    {delivered && <div className="delivered-overlay"><span><Check /></span><strong>Delivered!</strong></div>}
+    {!collapsed && <button className="rail-scrim" onClick={() => setCollapsed(true)} />}
+    <aside className="sidebar"><div className="sidebar-top"><button className="brand" onClick={() => collapsed ? setCollapsed(false) : navigate('home')}><Brand compact={collapsed} /></button>{!collapsed && <button className="sidebar-toggle" onClick={() => setCollapsed(true)}><PanelLeftClose /></button>}</div><div className="workspace-switch"><span className="workspace-avatar">{(profile?.organization || 'Y')[0]}</span>{!collapsed && <><span className="workspace-name"><strong>{profile?.organization}</strong><small>Workspace</small></span><ChevronDown /></>}</div><button className="sidebar-create" onClick={() => edit(null)}><Plus /><span>Create transmission</span></button><nav className="nav-group"><span className="nav-label">ANYCHANNEL</span><button className={view === 'home' || view === 'editor' ? 'active' : ''} onClick={() => navigate('home')}><LayoutGrid /><span>Transmissions</span></button><button className={view === 'apps' ? 'active' : ''} onClick={() => navigate('apps')}><Box /><span>My apps</span></button><button className={view === 'usage' ? 'active' : ''} onClick={() => navigate('usage')}><Settings2 /><span>Cloud usage</span></button></nav><nav className="nav-group settings-nav"><span className="nav-label">SETTINGS</span><button className={view === 'account' ? 'active' : ''} onClick={() => navigate('account')}><UserRound /><span>Account</span></button><button className={view === 'billing' ? 'active' : ''} onClick={() => navigate('billing')}><CreditCard /><span>Plan & billing</span></button></nav><nav className="nav-group compliments-nav"><button className={view === 'compliments' ? 'active' : ''} onClick={() => navigate('compliments')}><Gift /><span>Compliments</span></button></nav><div className="sidebar-bottom"><a className="sidebar-help" href="https://flatreality.eu/partners/outsourcing" target="_blank" rel="noreferrer"><span className="help-star">✦</span>{!collapsed && <><strong>Looking for outsourcing?</strong><small>Hire specialists for integration and development.</small></>}</a><button className="profile-link" onClick={() => navigate('account')}><Avatar profile={profile} className="user-avatar" />{!collapsed && <><span><strong>{profile?.name}</strong><small>{demoMode ? 'Demo workspace' : session?.user.email}</small></span><MoreHorizontal /></>}</button></div></aside>
+    <main className="main"><header className="topbar"><div className="breadcrumbs"><span>Workspace</span><ChevronRight /><strong>{pageTitle}</strong></div><div className="topbar-right"><span className="preview-pill">{demoMode ? 'DEMO MODE' : 'CLOUD ALPHA'}</span><Avatar profile={profile} className="top-avatar" /></div></header>{notice && <div className="global-notice"><span>{notice}</span><button onClick={() => setNotice('')}><X /></button></div>}<div className="content">
+      {view === 'home' && <Home posts={posts} visible={visible} apps={apps} links={postApps} filter={filter} search={search} used={usedThisMonth} percent={remainingPercent} onFilter={setFilter} onSearch={setSearch} onEdit={edit} />}
+      {view === 'editor' && <TransmissionForm key={editing?.id || 'new'} post={editing} apps={apps} initialAppIds={editing ? postApps[editing.id] || [] : []} busy={busy} onBack={() => navigate('home')} onUpload={file => uploadMedia(file, ownerId)} onSave={async (value, status, ids) => { setBusy(true); try { await saveTransmission(value, status, ids) } catch (error) { setNotice(error instanceof Error ? error.message : 'Save failed.') } finally { setBusy(false) } }} />}
+      {view === 'apps' && <AppsPage apps={apps} selected={selectedApp} creating={creatingApp} onSelect={setSelectedApp} onCreate={() => { setCreatingApp(true); setSelectedApp(null) }} onCancel={() => setCreatingApp(false)} onSave={createApp} onUpload={file => uploadMedia(file, ownerId)} />}
+      {view === 'account' && <AccountPage profile={profile} email={session?.user.email || ''} demo={demoMode} onSaved={setProfile} />}
+      {view === 'billing' && <Billing />}{view === 'usage' && <Usage used={usedThisMonth} percent={remainingPercent} />}{view === 'compliments' && <div className="settings-page"><div className="eyebrow accent-text">FREE FOR CREATORS</div><h1>Compliments</h1><p>Free Unity assets from Flat Reality are coming here soon.</p><div className="empty"><Gift /><h3>A little something is on the way.</h3></div></div>}
+    </div></main>
   </div>
 }
 
-function AccountForm({ profile, email, demo, onSaved }: { profile: Profile | null; email: string; demo: boolean; onSaved: (value: Profile) => void }) {
-  const [name, setName] = useState(profile?.name || '')
-  const [organization, setOrganization] = useState(profile?.organization || '')
-  const [message, setMessage] = useState('')
-  useEffect(() => { setName(profile?.name || ''); setOrganization(profile?.organization || '') }, [profile])
-  async function save(event: React.FormEvent) {
-    event.preventDefault()
-    if (!profile) return
-    const changed = { ...profile, name: name.trim(), organization: organization.trim() }
-    if (!demo && supabase) {
-      const result = await supabase.from('anychannel_profiles').update({ name: changed.name, organization: changed.organization }).eq('owner_id', profile.owner_id)
-      if (result.error) { setMessage(result.error.message); return }
-    }
-    onSaved(changed); setMessage('Account updated.')
-  }
-  return <form className="account-form" onSubmit={save}><label>Your name<input required maxLength={80} value={name} onChange={e => setName(e.target.value)} /></label><label>Organization<input required maxLength={120} value={organization} onChange={e => setOrganization(e.target.value)} /></label><label>Email<input value={email || 'demo@flatreality.eu'} disabled /></label><button className="primary">Save changes</button>{message && <p className="success-message">{message}</p>}</form>
-}
+function Meter({ used, percent }: { used: number; percent: number }) { return <div className="usage-mini"><div className="usage-mini-head"><Cloud /><span>Cloud plan</span><b>{percent}% left</b></div><div className="progress"><span style={{ width: `${percent}%` }} /></div><small>{used} of {TRANSMISSION_MONTHLY_LIMIT} transmissions delivered this month</small></div> }
+function Home({ posts, visible, apps, links, filter, search, used, percent, onFilter, onSearch, onEdit }: { posts: Transmission[]; visible: Transmission[]; apps: ChannelApp[]; links: Record<string, string[]>; filter: Filter; search: string; used: number; percent: number; onFilter: (v: Filter) => void; onSearch: (v: string) => void; onEdit: (v: Transmission | null) => void }) { return <><div className="page-intro"><div><div className="eyebrow accent-text">ANYCHANNEL / PUBLISHING</div><h1>Transmissions<span className="soft-dot">.</span></h1><p>Every great story starts with a transmission.</p></div><button className="primary" onClick={() => onEdit(null)}><Plus /> New transmission</button></div><div className="section-row"><div><h2>AnyChannel</h2><p>Compose, schedule and deliver your transmissions.</p></div><Meter used={used} percent={percent} /></div><div className="toolbar"><div className="tabs">{(['all', 'published', 'draft', 'scheduled'] as Filter[]).map(tab => <button className={filter === tab ? 'selected' : ''} onClick={() => onFilter(tab)} key={tab}>{tab[0].toUpperCase() + tab.slice(1)} <span>{tab === 'all' ? posts.length : posts.filter(p => p.status === tab).length}</span></button>)}</div><label className="search-box"><Search /><input value={search} onChange={e => onSearch(e.target.value)} placeholder="Search transmissions" /></label></div>{visible.length ? <div className="post-grid">{visible.map(post => <article className="post-card" key={post.id}><button className="post-cover" onClick={() => onEdit(post)}>{post.cover_url ? <img src={post.cover_url} alt="" /> : <span className="cover-placeholder"><b>FR.</b><small>TRANSMISSION</small></span>}</button><div className="post-body"><div className="post-meta"><span className={`status ${post.status}`}>{statusLabel(post)}</span><span>{formatDate(post.published_at || post.created_at)}</span></div><button className="post-title" onClick={() => onEdit(post)}>{post.title}</button><p>{post.excerpt}</p><div className="post-channel-icons">{(links[post.id] || []).map(id => { const app = apps.find(a => a.id === id); return app ? <AppIcon app={app} size="small" key={id} /> : null })}</div><button className="post-edit" onClick={() => onEdit(post)}>Edit transmission <ArrowRight /></button></div></article>)}</div> : <div className="empty"><FileText /><h3>No transmissions here yet.</h3><button className="primary" onClick={() => onEdit(null)}><Plus /> New transmission</button></div>}</> }
 
-function TransmissionForm({ post, onBack, onSave, onUpload, busy }: { post: Transmission | null; onBack: () => void; onSave: (value: Partial<Transmission>, status: 'draft' | 'published') => Promise<void>; onUpload: (file: File) => Promise<{ url: string; path: string }>; busy: boolean }) {
-  const [title, setTitle] = useState(post?.title || '')
-  const [slug, setSlug] = useState(post?.slug || '')
-  const [manualSlug, setManualSlug] = useState(!!post)
-  const [publication, setPublication] = useState(localDateValue(post?.published_at))
-  const [cover, setCover] = useState({ url: post?.cover_url || '', path: post?.cover_path || '' })
-  const [uploading, setUploading] = useState(false)
-  const [error, setError] = useState('')
-  const editor = useRef<EditorJS | null>(null)
-  const scheduled = publication && new Date(publication) > new Date()
-  async function submit(status: 'draft' | 'published') {
-    setError('')
-    if (status === 'published' && !title.trim()) { setError('Add a title before publishing.'); return }
-    try {
-      if (!editor.current) throw new Error('Story editor is still loading.')
-      const content = await editor.current.save() as Transmission['content']
-      const excerpt = excerptFromBlocks(content.blocks)
-      if (status === 'published' && !excerpt) throw new Error('Write some story text before publishing.')
-      const date = publication ? new Date(publication) : new Date()
-      if (Number.isNaN(date.getTime())) throw new Error('Choose a valid transmission date.')
-      await onSave({ title: title || 'Untitled transmission', slug: slug || slugify(title), content, excerpt, cover_url: cover.url, cover_path: cover.path, published_at: date.toISOString() }, status)
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save transmission.') }
-  }
-  async function selectCover(file?: File) {
-    if (!file) return
-    setUploading(true); setError('')
-    try { setCover(await onUpload(file)) } catch (cause) { setError(cause instanceof Error ? cause.message : 'Image upload failed.') }
-    finally { setUploading(false) }
-  }
-  return <div className="editor-page"><button className="back-link" onClick={onBack}><ArrowLeft size={17} /> All transmissions</button><div className="editor-heading"><div><div className="eyebrow purple">FR CHANNEL</div><h1>{post ? 'Edit transmission' : 'Create a transmission'}</h1><p>Website publishing</p></div><div className="editor-actions"><button className="outline" disabled={busy || uploading} onClick={() => submit('draft')}>Save draft</button><button className="primary" disabled={busy || uploading} onClick={() => submit('published')}>{busy ? 'Saving…' : scheduled ? 'Schedule transmission' : 'Publish transmission'} <ArrowRight size={17} /></button></div></div>
-    {error && <div className="form-error">{error}</div>}
-    <div className="editor-layout"><div className="editor-main"><section className="editor-panel"><div className="panel-title"><span className="panel-number">01</span><div><h2>Transmission details</h2><p>Give your story a clear beginning.</p></div></div><div className="fields"><label>Title<input autoFocus maxLength={160} value={title} onChange={e => { setTitle(e.target.value); if (!manualSlug) setSlug(slugify(e.target.value)) }} placeholder="Give this transmission a title" /></label><label>Transmission date<div className="input-icon"><CalendarDays size={18} /><input type="datetime-local" value={publication} onChange={e => setPublication(e.target.value)} /></div><small>{scheduled ? 'Will be published automatically at the selected time.' : 'Publishes immediately.'}</small></label><label>Article URL<div className="slug-input"><span>flatreality.eu/channel/</span><input value={slug} onChange={e => { setManualSlug(true); setSlug(slugify(e.target.value)) }} placeholder="article-url" /><span>/</span></div><small>Website routing will be connected when delivery channels are implemented.</small></label></div></section>
-      <section className="editor-panel"><div className="panel-title"><span className="panel-number">02</span><div><h2>Cover</h2><p>Lead with a strong image.</p></div></div><p className="panel-description">JPG, PNG, WebP or GIF. Uploaded automatically to your cloud media library.</p><label className="cover-upload">{cover.url ? <img src={cover.url} alt="Cover preview" /> : <div className="cover-empty"><ImageIcon size={28} /><span>Cover image</span></div>}<span className="cover-choose">{uploading ? 'Uploading…' : 'Choose cover'}</span><input type="file" accept="image/jpeg,image/png,image/webp,image/gif" disabled={uploading} onChange={e => selectCover(e.target.files?.[0])} /></label></section>
-      <section className="editor-panel story-panel"><div className="panel-title"><span className="panel-number">03</span><div><h2>Story</h2><p>Compose the transmission.</p></div></div><p className="panel-description">Use the plus button for headings, lists, images, video embeds, separators, quotes and custom HTML.</p><StoryEditor content={post?.content || { blocks: [{ type: 'paragraph', data: { text: '' } }] }} onReady={value => { editor.current = value }} onUpload={async file => ({ url: (await onUpload(file)).url })} /><p className="editor-safety">Custom HTML is stored for compatibility with FR Channel; public rendering must sanitize it before use.</p></section></div>
-      <aside className="editor-aside"><div className="tip-card"><div className="tip-icon">✦</div><strong>One story, many places.</strong><p>Compose now. Delivery channels and game/widget connections are coming in the next phase.</p></div><div className="side-summary"><h3>Transmission status</h3><div><span>Currently</span><strong>{post ? statusLabel(post) : 'Unsaved'}</strong></div><div><span>Publishing</span><strong>{scheduled ? 'Scheduled' : 'Immediately'}</strong></div></div></aside></div>
-    <div className="mobile-editor-actions"><button className="outline" disabled={busy} onClick={() => submit('draft')}>Save draft</button><button className="primary" disabled={busy} onClick={() => submit('published')}>{scheduled ? 'Schedule' : 'Publish'}</button></div>
-  </div>
+function AccountPage({ profile, email, demo, onSaved }: { profile: Profile | null; email: string; demo: boolean; onSaved: (v: Profile) => void }) { const [name, setName] = useState(profile?.name || ''); const [org, setOrg] = useState(profile?.organization || ''); const [github, setGithub] = useState(profile?.github_url || ''); const [message, setMessage] = useState(''); async function save(e: React.FormEvent) { e.preventDefault(); if (!profile) return; const github_url = github.trim() ? (github.startsWith('http') ? github.trim() : `https://github.com/${github.replace(/^@/, '')}`) : null; if (github_url && !githubAvatarUrl(github_url)) { setMessage('Enter a valid GitHub profile.'); return } const changed = { ...profile, name: name.trim(), organization: org.trim(), github_url }; if (!demo && supabase) { const result = await supabase.from('anychannel_profiles').update({ name: changed.name, organization: changed.organization, github_url }).eq('owner_id', profile.owner_id); if (result.error) { setMessage(result.error.message); return } } onSaved(changed); setMessage('Account updated.') } return <div className="settings-page"><div className="eyebrow accent-text">SETTINGS / ACCOUNT</div><h1>Account</h1><p>Keep the essentials of your workspace up to date.</p><div className="settings-card account-card"><div><h2>Profile information</h2><p>Add your GitHub profile to use its avatar.</p></div><form className="account-form" onSubmit={save}><Avatar profile={profile ? { ...profile, github_url: github || null } : null} /><label>Your name<input value={name} onChange={e => setName(e.target.value)} required /></label><label>Organization<input value={org} onChange={e => setOrg(e.target.value)} required /></label><label>GitHub profile<input value={github} onChange={e => setGithub(e.target.value)} placeholder="github.com/username" /></label><label>Email<input value={email || 'demo@flatreality.eu'} disabled /></label><button className="primary">Save changes</button>{message && <p className="success-message">{message}</p>}</form></div>{!demo && <button className="outline signout" onClick={() => supabase?.auth.signOut().then(() => location.reload())}><LogOut /> Sign out</button>}</div> }
+function Billing() { return <div className="settings-page"><div className="eyebrow accent-text">SETTINGS / BILLING</div><h1>Plan & billing</h1><p>A transparent home for your Cloud plan.</p><div className="settings-card billing-card"><div className="plan-icon"><Cloud /></div><div><span className="plan-caption">CURRENT PLAN</span><h2>Cloud alpha</h2><p>Billing is not connected yet. No payment details are collected.</p></div><span className="coming-soon">Coming later</span></div><div className="settings-card price-card"><div><h2>Planned Cloud pricing</h2><p>One account, unlimited delivery apps.</p></div><strong>€9 <small>/ month</small></strong></div></div> }
+function Usage({ used, percent }: { used: number; percent: number }) { return <div className="settings-page"><div className="eyebrow accent-text">ANYCHANNEL / USAGE</div><h1>Cloud usage</h1><p>Your monthly transmission allowance.</p><div className="settings-card usage-card"><div className="usage-stat"><span>Transmissions remaining</span><strong>{Math.max(0, TRANSMISSION_MONTHLY_LIMIT - used)} <small>/ {TRANSMISSION_MONTHLY_LIMIT}</small></strong></div><div className="progress"><span style={{ width: `${percent}%` }} /></div><p>Drafts do not count. Published and scheduled transmissions do.</p></div></div> }
+
+function AppsPage({ apps, selected, creating, onSelect, onCreate, onCancel, onSave, onUpload }: { apps: ChannelApp[]; selected: ChannelApp | null; creating: boolean; onSelect: (v: ChannelApp | null) => void; onCreate: () => void; onCancel: () => void; onSave: (v: { name: string; app_type: 'game' | 'webapp'; icon_url: string; icon_path: string }) => Promise<void>; onUpload: (f: File) => Promise<{ url: string; path: string }> }) {
+  if (creating) return <AppCreator onCancel={onCancel} onSave={onSave} onUpload={onUpload} />
+  if (selected) return <AppDetails app={selected} onBack={() => onSelect(null)} />
+  return <div className="apps-page"><div className="page-intro"><div><div className="eyebrow accent-text">ANYCHANNEL / DELIVERY</div><h1>My apps<span className="soft-dot">.</span></h1><p>Connect games and web apps that receive your transmissions.</p></div><button className="primary" onClick={onCreate}><Plus /> Create new app</button></div>{apps.length ? <div className="apps-grid">{apps.map(app => <button className="app-card" key={app.id} onClick={() => onSelect(app)}><AppIcon app={app} size="large" /><span><strong>{app.name}</strong><small>{app.app_type === 'game' ? 'Game' : 'WebApp'}</small><code>{app.app_id}</code></span><ChevronRight /></button>)}</div> : <div className="empty"><Box /><h3>No delivery apps yet.</h3><p>Create an app to get its App ID.</p><button className="primary" onClick={onCreate}><Plus /> Create new app</button></div>}</div>
 }
+function AppCreator({ onCancel, onSave, onUpload }: { onCancel: () => void; onSave: (v: { name: string; app_type: 'game' | 'webapp'; icon_url: string; icon_path: string }) => Promise<void>; onUpload: (f: File) => Promise<{ url: string; path: string }> }) { const [name, setName] = useState(''); const [type, setType] = useState<'game' | 'webapp'>('game'); const [icon, setIcon] = useState({ url: '', path: '' }); const [busy, setBusy] = useState(false); return <div className="settings-page"><button className="back-link" onClick={onCancel}><ArrowLeft /> My apps</button><div className="eyebrow accent-text">ANYCHANNEL / NEW APP</div><h1>Create new app</h1><p>Set up a destination for your transmissions.</p><form className="settings-card app-create-form" onSubmit={async e => { e.preventDefault(); setBusy(true); try { await onSave({ name, app_type: type, icon_url: icon.url, icon_path: icon.path }) } finally { setBusy(false) } }}><label className="app-icon-upload">{icon.url ? <img src={icon.url} alt="" /> : <ImageIcon />}<span>Choose icon</span><input type="file" accept="image/*" onChange={async e => { const file = e.target.files?.[0]; if (file) setIcon(await onUpload(file)) }} /></label><div className="app-create-fields"><label>App name<input value={name} onChange={e => setName(e.target.value)} placeholder="My awesome game" required /></label><fieldset><legend>Type</legend><button type="button" className={type === 'game' ? 'selected' : ''} onClick={() => setType('game')}><Gamepad2 /> Game</button><button type="button" className={type === 'webapp' ? 'selected' : ''} onClick={() => setType('webapp')}><Globe2 /> WebApp</button></fieldset><button className="primary" disabled={busy}>{busy ? 'Creating…' : 'Create app'} <ArrowRight /></button></div></form></div> }
+function AppDetails({ app, onBack }: { app: ChannelApp; onBack: () => void }) { const [copied, setCopied] = useState(false); async function copy() { await navigator.clipboard.writeText(app.app_id); setCopied(true); setTimeout(() => setCopied(false), 1000) } return <div className="app-details"><button className="back-link" onClick={onBack}><ArrowLeft /> My apps</button><div className="app-identity"><AppIcon app={app} size="large" /><div><span>{app.app_type.toUpperCase()}</span><h1>{app.name}</h1><p>Created {formatDate(app.created_at)}</p></div></div><section className="app-info-card"><div><span>APP ID</span><code>{app.app_id}</code></div><button className="outline" onClick={copy}>{copied ? <Check /> : <Copy />} {copied ? 'Copied' : 'Copy App ID'}</button></section><h2 className="setup-title">Setup</h2><div className="setup-grid"><article><span>01</span><h3>Download the Unity integration</h3><p>Add Channel to your Unity project.</p><a className="primary" href={`${import.meta.env.BASE_URL}downloads/com.flatreality.channel.zip`} download>Download integration <ArrowRight /></a></article><article><span>02</span><h3>Connect your project</h3><p>Open <b>Tools → Flat Reality SDK → Channel</b>, choose Cloud and paste this App ID.</p><button className="app-id-copy" onClick={copy}><code>{app.app_id}</code><Copy /></button></article><article><span>03</span><h3>You're ready!</h3><p>Create a transmission and choose <b>{app.name}</b> under Channels for delivery.</p></article></div><p className="domain-note">Primary: <a href={DASHBOARD_PRIMARY_URL}>{DASHBOARD_PRIMARY_URL}</a> · fallback: <a href={DASHBOARD_FALLBACK_URL}>{DASHBOARD_FALLBACK_URL}</a></p></div> }
+
+function TransmissionForm({ post, apps, initialAppIds, onBack, onSave, onUpload, busy }: { post: Transmission | null; apps: ChannelApp[]; initialAppIds: string[]; onBack: () => void; onSave: (v: Partial<Transmission>, s: 'draft' | 'published', ids: string[]) => Promise<void>; onUpload: (f: File) => Promise<{ url: string; path: string }>; busy: boolean }) {
+  const [title, setTitle] = useState(post?.title || ''); const [apiKey, setApiKey] = useState((post?.slug || '').replaceAll('-', '_')); const [manualKey, setManualKey] = useState(!!post); const [publication, setPublication] = useState(localDateValue(post?.published_at)); const [cover, setCover] = useState({ url: post?.cover_url || '', path: post?.cover_path || '' }); const [selected, setSelected] = useState(initialAppIds); const [uploading, setUploading] = useState(false); const [error, setError] = useState(''); const editor = useRef<EditorJS | null>(null); const scheduled = publication && new Date(publication) > new Date()
+  async function submit(status: 'draft' | 'published') { setError(''); try { if (!title.trim() && status === 'published') throw new Error('Add a title before publishing.'); if (!editor.current) throw new Error('Story editor is loading.'); const content = await editor.current.save() as Transmission['content']; const excerpt = excerptFromBlocks(content.blocks); if (!excerpt && status === 'published') throw new Error('Write some story text before publishing.'); await onSave({ title: title || 'Untitled transmission', slug: apiKey, content, excerpt, cover_url: cover.url, cover_path: cover.path, published_at: new Date(publication).toISOString() }, status, selected) } catch (cause) { setError(cause instanceof Error ? cause.message : 'Save failed.') } }
+  return <div className="editor-page"><button className="back-link" onClick={onBack}><ArrowLeft /> All transmissions</button><div className="editor-heading"><div><div className="eyebrow accent-text">ANYCHANNEL</div><h1>{post ? 'Edit transmission' : 'Create a transmission'}</h1><p>Cloud publishing</p></div><div className="editor-actions"><button className="outline" onClick={() => submit('draft')}>Save draft</button><button className="primary" disabled={busy || uploading} onClick={() => submit('published')}>{busy ? 'Saving…' : scheduled ? 'Schedule transmission' : 'Publish transmission'} <ArrowRight /></button></div></div>{error && <div className="form-error">{error}</div>}<div className="editor-layout"><div className="editor-main"><EditorPanel n="01" title="Transmission details" subtitle="Give your story a clear beginning."><div className="fields"><label>Title<input autoFocus value={title} onChange={e => { setTitle(e.target.value); if (!manualKey) setApiKey(slugify(e.target.value).replaceAll('-', '_')) }} placeholder="Give this transmission a title" /></label><label>Transmission date<div className="input-icon"><CalendarDays /><input type="datetime-local" value={publication} onChange={e => setPublication(e.target.value)} /></div><small>{scheduled ? 'Will be published automatically.' : 'Publishes immediately.'}</small></label><label>API key<input className="api-key-input" value={apiKey} onChange={e => { setManualKey(true); setApiKey(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '')) }} placeholder="e.g. my_article_01" /><small>A stable key for integrations to request this transmission.</small></label></div></EditorPanel><EditorPanel n="02" title="Cover" subtitle="Lead with a strong image."><p className="panel-description">JPG, PNG, WebP or GIF.</p><label className="cover-upload">{cover.url ? <img src={cover.url} alt="" /> : <span className="cover-empty"><ImageIcon />Cover image</span>}<span className="cover-choose">{uploading ? 'Uploading…' : 'Choose cover'}</span><input type="file" accept="image/*" onChange={async e => { const file = e.target.files?.[0]; if (!file) return; setUploading(true); try { setCover(await onUpload(file)) } finally { setUploading(false) } }} /></label></EditorPanel><EditorPanel n="03" title="Story" subtitle="Compose the transmission."><p className="panel-description">Use the plus button for headings, lists, images, video embeds, separators, quotes and custom HTML.</p><StoryEditor content={post?.content || { blocks: [{ type: 'paragraph', data: { text: '' } }] }} onReady={value => { editor.current = value }} onUpload={async file => ({ url: (await onUpload(file)).url })} /></EditorPanel><EditorPanel n="04" title="Channels for delivery" subtitle="Choose where this transmission should appear.">{apps.length ? <div className="channel-picker">{apps.map(app => <label className={selected.includes(app.id) ? 'selected' : ''} key={app.id}><input type="checkbox" checked={selected.includes(app.id)} onChange={() => setSelected(current => current.includes(app.id) ? current.filter(id => id !== app.id) : [...current, app.id])} /><AppIcon app={app} /><span><strong>{app.name}</strong><small>{app.app_type === 'game' ? 'Game' : 'WebApp'}</small></span><Check /></label>)}</div> : <p className="no-channels">No apps yet. Create one from My apps.</p>}</EditorPanel></div><aside className="editor-aside"><div className="tip-card"><div className="tip-icon">✦</div><strong>One story, many places.</strong><p>Select connected apps and deliver the same story everywhere.</p></div><div className="side-summary"><h3>Transmission status</h3><div><span>Currently</span><strong>{post ? statusLabel(post) : 'Unsaved'}</strong></div><div><span>Destinations</span><strong>{selected.length}</strong></div></div></aside></div></div>
+}
+function EditorPanel({ n, title, subtitle, children }: { n: string; title: string; subtitle: string; children: React.ReactNode }) { return <section className="editor-panel"><div className="panel-title"><span className="panel-number">{n}</span><div><h2>{title}</h2><p>{subtitle}</p></div></div>{children}</section> }

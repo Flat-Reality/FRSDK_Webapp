@@ -44,6 +44,7 @@ export type Database = {
       anychannel_profiles: {
         Row: {
           created_at: string
+          github_url: string | null
           name: string
           organization: string
           owner_id: string
@@ -51,6 +52,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          github_url?: string | null
           name: string
           organization: string
           owner_id: string
@@ -58,11 +60,54 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          github_url?: string | null
           name?: string
           organization?: string
           owner_id?: string
           plan?: string
         }
+        Relationships: []
+      }
+      anychannel_apps: {
+        Row: {
+          app_id: string
+          app_type: string
+          created_at: string
+          icon_path: string | null
+          icon_url: string | null
+          id: string
+          name: string
+          owner_id: string
+          updated_at: string
+        }
+        Insert: {
+          app_id?: string
+          app_type: string
+          created_at?: string
+          icon_path?: string | null
+          icon_url?: string | null
+          id?: string
+          name: string
+          owner_id: string
+          updated_at?: string
+        }
+        Update: {
+          app_id?: string
+          app_type?: string
+          created_at?: string
+          icon_path?: string | null
+          icon_url?: string | null
+          id?: string
+          name?: string
+          owner_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      anychannel_transmission_apps: {
+        Row: { app_id: string; created_at: string; transmission_id: string }
+        Insert: { app_id: string; created_at?: string; transmission_id: string }
+        Update: { app_id?: string; created_at?: string; transmission_id?: string }
         Relationships: []
       }
       anychannel_transmissions: {
